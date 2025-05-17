@@ -279,6 +279,34 @@ namespace Jab
     {
         T GetService(string name);
     }
+    
+#if JAB_ATTRIBUTES_PACKAGE
+    public
+#else
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Jab", null)]
+    internal
+#endif
+    struct DisposableWrapper : IDisposable, IAsyncDisposable
+    {
+        private readonly IDisposable? _disposable;
+        private readonly IAsyncDisposable? _asyncDisposable;
+
+        public DisposableWrapper(IDisposable? disposable, IAsyncDisposable? asyncDisposable)
+        {
+            _disposable = disposable;
+            _asyncDisposable = asyncDisposable;
+        }
+
+        public void Dispose()
+        {
+            _disposable?.Dispose();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return _asyncDisposable?.DisposeAsync() ?? default;
+        }
+    }
 
 #if JAB_ATTRIBUTES_PACKAGE
     public
