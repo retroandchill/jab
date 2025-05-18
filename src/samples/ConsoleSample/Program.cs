@@ -1,4 +1,5 @@
-﻿using Jab;
+﻿using ConsoleSample;
+using Jab;
 using ModuleSample;
 
 new ServiceProvider().GetService<Program>().Run(args);
@@ -7,6 +8,7 @@ new ServiceProvider().GetService<Program>().Run(args);
 [Import(typeof(IModule))]
 [Singleton(typeof(Program))]
 [Singleton(typeof(Logger))]
+[Transient(typeof(TransientDisposable))]
 partial class ServiceProvider
 {
 }

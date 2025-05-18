@@ -1,6 +1,11 @@
+using System;
 namespace ModuleSample
 {
-    public class ServiceDefinedInAModule
+    public class ServiceDefinedInAModule : IDisposable
     {
+        public void Dispose()
+        {
+            throw new NotImplementedException();
+        }
     }
 }
