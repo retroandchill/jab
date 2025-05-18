@@ -25,19 +25,15 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
         if (serviceCallSite.Lifetime != ServiceLifetime.Transient)
         {
             var cacheLocation = GetCacheLocation(serviceCallSite.Identity);
-            codeWriter.Line($"if ({cacheLocation} == null)");
-            codeWriter.Line($"lock (this)");
-            using (codeWriter.Scope($"if ({cacheLocation} == null)"))
-            {
-                GenerateCallSite(
-                    codeWriter,
-                    rootReference,
-                    serviceCallSite,
-                    (w, v) =>
-                    {
-                        w.Line($"{cacheLocation} = {v};");
-                    });
-            }
+            codeWriter.Line($"#nullable disable");
+            GenerateCallSite(
+                codeWriter,
+                rootReference,
+                serviceCallSite,
+                (w, v) =>
+                {
+                    codeWriter.Line($"{typeof(LazyInitializer)}.EnsureInitialized(ref {cacheLocation} , () => {v});");
+                });
 
             if (serviceCallSite.ImplementationType.IsValueType)
             {
@@ -47,6 +43,7 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
             {
                 valueCallback(codeWriter, w => w.Append($"{cacheLocation}"));
             }
+            codeWriter.Line($"#nullable enable");
         }
         else if (serviceCallSite.IsDisposable != false)
         {
@@ -364,13 +361,10 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
 
                         using (codeWriter.Scope($"private Scope GetRootScope()"))
                         {
-                            codeWriter.Line($"if (_rootScope == default)");
-                            codeWriter.Line($"lock (this)");
-                            using (codeWriter.Scope($"if (_rootScope == default)"))
-                            {
-                                codeWriter.Line($"_rootScope = CreateScope();");
-                            }
+                            codeWriter.Line($"#nullable disable");
+                            codeWriter.Line($"{typeof(LazyInitializer)}.EnsureInitialized(ref _rootScope , () => CreateScope());");
                             codeWriter.Line($"return _rootScope;");
+                            codeWriter.Line($"#nullable enable");
                         }
                     }
                 }
