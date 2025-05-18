@@ -88,7 +88,7 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
     {
         if (other.IsMainImplementation)
         {
-            codeWriter.Append($"{reference}.GetService<{other.Type}>()");
+            codeWriter.Append($"((IServiceProvider<{other.Type}>){reference}).GetService()");
         }
         else
         {
