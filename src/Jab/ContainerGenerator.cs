@@ -25,25 +25,37 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
         if (serviceCallSite.Lifetime != ServiceLifetime.Transient)
         {
             var cacheLocation = GetCacheLocation(serviceCallSite.Identity);
-            codeWriter.Line($"#nullable disable");
-            GenerateCallSite(
-                codeWriter,
-                rootReference,
-                serviceCallSite,
-                (w, v) =>
-                {
-                    codeWriter.Line($"{typeof(LazyInitializer)}.EnsureInitialized(ref {cacheLocation} , () => {v});");
-                });
-
             if (serviceCallSite.ImplementationType.IsValueType)
             {
+                codeWriter.Line($"if ({cacheLocation} == null)");
+                codeWriter.Line($"lock (this)");
+                using (codeWriter.Scope($"if ({cacheLocation} == null)"))
+                {
+                    GenerateCallSite(
+                        codeWriter,
+                        rootReference,
+                        serviceCallSite,
+                        (w, v) =>
+                        {
+                            w.Line($"{cacheLocation} = {v};");
+                        });
+                }
                 valueCallback(codeWriter, w => w.Append($"{cacheLocation}.Value"));
             }
             else
             {
+                codeWriter.Line($"#nullable disable");
+                GenerateCallSite(
+                    codeWriter,
+                    rootReference,
+                    serviceCallSite,
+                    (w, v) =>
+                    {
+                        codeWriter.Line($"{typeof(LazyInitializer)}.EnsureInitialized(ref {cacheLocation} , () => {v});");
+                    });
                 valueCallback(codeWriter, w => w.Append($"{cacheLocation}"));
+                codeWriter.Line($"#nullable enable");
             }
-            codeWriter.Line($"#nullable enable");
         }
         else if (serviceCallSite.IsDisposable != false)
         {
@@ -60,21 +72,16 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
             if (disposableTypes.Count > 0)
             {
                 var hasDisposable = disposableTypes.Contains(typeof(IDisposable).FullName);
-                codeWriter.Line($"#nullable disable");
                 if (root.KnownTypes.IAsyncDisposableType != null)
                 {
-                    var disposableListName = $"{typeof(List<>).Namespace}.List<DisposableWrapper>";
                     var hasAsyncDisposable = disposableTypes.Contains(root.KnownTypes.IAsyncDisposableType.ToDisplayString());
                     
-                    codeWriter.Line($"{typeof(LazyInitializer)}.EnsureInitialized<{disposableListName}>(ref _disposables, () => new {disposableListName}());");
                     codeWriter.Line($"_disposables.Add(new DisposableWrapper({(hasDisposable ? "service" : "null")}, {(hasAsyncDisposable ? "service" : "null")}));");
                 }
                 else if (hasDisposable)
                 {
-                    codeWriter.Line($"{typeof(LazyInitializer)}.EnsureInitialized<{typeof(List<IDisposable>)}>(ref _disposables, () => new {typeof(List<IDisposable>)}());");
                     codeWriter.Line($"_disposables.Add(service as {typeof(IDisposable)});");
                 }
-                codeWriter.Line($"#nullable enable");
             }
             valueCallback(codeWriter, w => w.Append($"service"));
         }
@@ -484,34 +491,37 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
         if (root.KnownTypes.IAsyncDisposableType != null)
         {
             disposableListName = $"{typeof(List<>).Namespace}.List<DisposableWrapper>";
-            using (codeWriter.Scope($"private class DisposableWrapper"))
+            if (!isScoped)
             {
-                codeWriter.Line($"private readonly {typeof(IDisposable)}? _disposable;");
-                codeWriter.Line($"private readonly {root.KnownTypes.IAsyncDisposableType}? _asyncDisposable;");
-
-                codeWriter.Line();
-
-                using (codeWriter.Scope($"public DisposableWrapper({typeof(IDisposable)}? disposable, {root.KnownTypes.IAsyncDisposableType}? asyncDisposable)"))
+                using (codeWriter.Scope($"private struct DisposableWrapper"))
                 {
-                    codeWriter.Line($"_disposable = disposable;");
-                    codeWriter.Line($"_asyncDisposable = asyncDisposable;");
-                }
+                    codeWriter.Line($"private readonly {typeof(IDisposable)}? _disposable;");
+                    codeWriter.Line($"private readonly {root.KnownTypes.IAsyncDisposableType}? _asyncDisposable;");
 
-                codeWriter.Line();
+                    codeWriter.Line();
 
-                using (codeWriter.Scope($"public void Dispose()"))
-                {
-                    codeWriter.Line($"_disposable?.Dispose();");
-                }
+                    using (codeWriter.Scope($"public DisposableWrapper({typeof(IDisposable)}? disposable, {root.KnownTypes.IAsyncDisposableType}? asyncDisposable)"))
+                    {
+                        codeWriter.Line($"_disposable = disposable;");
+                        codeWriter.Line($"_asyncDisposable = asyncDisposable;");
+                    }
 
-                using (codeWriter.Scope($"public async ValueTask DisposeAsync()"))
-                {
-                    codeWriter.Line($"if (_asyncDisposable is not null) await _asyncDisposable.DisposeAsync();");
+                    codeWriter.Line();
+
+                    using (codeWriter.Scope($"public void Dispose()"))
+                    {
+                        codeWriter.Line($"_disposable?.Dispose();");
+                    }
+
+                    using (codeWriter.Scope($"public async ValueTask DisposeAsync()"))
+                    {
+                        codeWriter.Line($"if (_asyncDisposable is not null) await _asyncDisposable.DisposeAsync();");
+                    }
                 }
             }
         }
 
-        codeWriter.Line($"private {disposableListName}? _disposables;");
+        codeWriter.Line($"private {disposableListName} _disposables = new();");
         codeWriter.Line();
 
         if (root.KnownTypes.IAsyncDisposableType != null)
@@ -533,8 +543,7 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
                 {
                     codeWriter.Line($"_rootScope?.Dispose();");
                 }
-
-                using (codeWriter.Scope($"if (_disposables != null)"))
+                
                 using (codeWriter.Scope($"foreach (var service in _disposables)"))
                 {
                     codeWriter.Line($"service.Dispose();");
@@ -552,18 +561,23 @@ public partial class ContainerGenerator : DiagnosticAnalyzer
                     if (rootService.IsDisposable == false ||
                         (rootService.Lifetime == ServiceLifetime.Singleton && isScoped) ||
                         (rootService.Lifetime == ServiceLifetime.Scoped && !isScoped) ||
-                        rootService.Lifetime == ServiceLifetime.Transient ||
-                        !rootService.Identity.Type.Interfaces.Any(x => x.ToDisplayString() == root.KnownTypes.IAsyncDisposableType.ToDisplayString())) continue;
+                        rootService.Lifetime == ServiceLifetime.Transient) continue;
 
-                    codeWriter.Line($"if ({GetCacheLocation(rootService.Identity)} is not null) await {GetCacheLocation(rootService.Identity)}.DisposeAsync();");
+                    if (rootService.Identity.Type.Interfaces.Any(x => x.ToDisplayString() == root.KnownTypes.IAsyncDisposableType.ToDisplayString()))
+                    {
+                        codeWriter.Line($"if ({GetCacheLocation(rootService.Identity)} is not null) await {GetCacheLocation(rootService.Identity)}.DisposeAsync();");
+                    } else if (rootService.Identity.Type.Interfaces.Any(x => x.ToDisplayString() == typeof(IDisposable).FullName))
+                    {
+                        codeWriter.Line($"{GetCacheLocation(rootService.Identity)}?.Dispose();");
+                    }
+                    
                 }
 
                 if (!isScoped)
                 {
                     codeWriter.Line($"if (_rootScope is not null) await _rootScope.DisposeAsync();");
                 }
-
-                using (codeWriter.Scope($"if (_disposables != null)"))
+                
                 using (codeWriter.Scope($"foreach (var service in _disposables)"))
                 {
                     codeWriter.Line($"await service.DisposeAsync();");
