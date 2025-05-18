@@ -19,9 +19,5 @@
     <ItemGroup>
         <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
     </ItemGroup>
-    
-    <ItemGroup>
-      <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="6.0.0" />
-    </ItemGroup>
 
 </Project>
